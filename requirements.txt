@@ -1,0 +1,17 @@
+# Package names only, intentionally unpinned for now.
+# Do NOT run pip install -r until Milestone 1 (scripts/check_env.py) is done.
+# After the baseline works, we will pin the versions that were actually tested
+# (pip freeze) so the project is reproducible.
+#
+# torch must match your CUDA build, so install it first and separately.
+torch
+numpy
+opencv-python
+pillow
+datasets
+jiwer
+matplotlib
+pandas
+tqdm
+pytest
+streamlit

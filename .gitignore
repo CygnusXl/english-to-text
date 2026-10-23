@@ -1,0 +1,34 @@
+# Virtual environments
+venv/
+.venv/
+env/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ipynb_checkpoints/
+
+# Large artifacts kept out of Git
+checkpoints/*
+!checkpoints/.gitkeep
+data/raw/*
+!data/raw/.gitkeep
+data/processed/*
+!data/processed/.gitkeep
+data/real_page_test/*
+!data/real_page_test/.gitkeep
+*.pt
+*.pth
+*.ckpt
+
+# Generated results (commit selected figures/tables on purpose with git add -f)
+results/*
+!results/.gitkeep
+
+# Hugging Face and editor files
+.cache/
+.vscode/
+.idea/
+.DS_Store
