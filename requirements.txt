@@ -1,17 +1,10 @@
-# Package names only, intentionally unpinned for now.
-# Do NOT run pip install -r until Milestone 1 (scripts/check_env.py) is done.
-# After the baseline works, we will pin the versions that were actually tested
-# (pip freeze) so the project is reproducible.
+# Dependencies for the Streamlit app (this is the file Streamlit Community Cloud installs).
+# Package names are intentionally unpinned for now. After the baseline works we
+# will pin the versions that were actually tested, using pip freeze.
 #
-# torch must match your CUDA build, so install it first and separately.
-torch
-numpy
-opencv-python
-pillow
-datasets
-jiwer
-matplotlib
-pandas
-tqdm
-pytest
+# opencv-python-headless is required on Streamlit Cloud (no display libraries).
 streamlit
+numpy
+pandas
+pillow
+opencv-python-headless

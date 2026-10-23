@@ -44,6 +44,33 @@ python3 scripts/check_env.py
 
 The script only reads information; it installs nothing.
 
+## Web app (Streamlit)
+
+```bash
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+streamlit run app.py
+```
+
+Current state: page straightening and line detection work. Text output is
+disabled until a trained checkpoint exists at `checkpoints/best.pt`; the app
+shows a notice instead of inventing text. No external API is used.
+
+Run the tests with `pip install pytest` then `python3 -m pytest tests -v`.
+The line-detection tests use a synthetic page, so they check the geometry
+code, not real handwriting accuracy.
+
+### Deploy on Streamlit Community Cloud
+
+1. Push this repo to GitHub.
+2. In Streamlit Community Cloud choose **New app**, pick this repo, branch
+   `main`, and main file path `app.py`.
+3. Once a model is trained, the weights must be in the repo for the deployed
+   app to see them. `checkpoints/*.pt` is git-ignored, so add the final model
+   on purpose: `git add -f checkpoints/best.pt` (keep it under GitHub's
+   100 MB file limit, or use Git LFS). Also add `torch` to `requirements.txt`
+   at that point.
+
 ## Dataset attribution
 
 OpenHand-Synth: https://huggingface.co/datasets/to-be/OpenHand-Synth

@@ -1,0 +1,10 @@
+# Extra packages for training and evaluation on your own machine (not needed by the deployed app).
+# Install AFTER Milestone 1 confirms your environment. Install torch separately first so it
+# matches your CUDA build (see https://pytorch.org/get-started/locally/).
+-r requirements.txt
+torch
+datasets
+jiwer
+matplotlib
+tqdm
+pytest
