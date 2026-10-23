@@ -2,7 +2,7 @@
 
 Run from the repository root:  python3 -m pytest tests/test_line_detection.py -v
 
-The synthetic page is made with OpenCV text, so it checks the geometry code
+The synthetic page is made with computer-drawn text, so it checks the geometry code
 (skew, projection profile, ordering, manual fallback). It does NOT measure
 real handwriting performance.
 """

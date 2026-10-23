@@ -2,16 +2,20 @@
 
 Pipeline for one page photo or scan:
 
-    BGR image -> grayscale -> (1) estimate skew -> rotate to straighten
-              -> (2) ink mask (background-normalised Otsu threshold)
-              -> (3) horizontal projection profile -> text-line boxes
-              -> (4) crop each line
+    BGR image -> grayscale
+              -> flatten uneven lighting -> ink mask (Otsu threshold)
+              -> estimate skew -> rotate to straighten
+              -> horizontal projection profile -> text-line boxes
+              -> crop each line
 
 Segmentation is kept separate from recognition so each part can be tested
 on its own. Projection-profile detection works for conventional,
 left-to-right, top-to-bottom notes with reasonably separated lines. It can
 fail on overlapping lines, ruled paper, heavy shadows or curved pages; use
 manual_line_boxes() as the fallback in those cases.
+
+Every intermediate result is kept on PreparedPage so the app can show the
+process step by step.
 """
 
 from __future__ import annotations
@@ -45,6 +49,13 @@ class PreparedPage:
     gray: np.ndarray  # straightened grayscale page, 0-255, white background
     ink: np.ndarray  # straightened ink mask, 255 where there is ink
     skew_angle: float  # degrees that were applied to straighten the page
+    # Intermediate stages, kept so the app can show each step of the process.
+    gray_raw: np.ndarray | None = None  # grayscale before straightening
+    background: np.ndarray | None = None  # estimated paper brightness (ink erased)
+    flat: np.ndarray | None = None  # grayscale divided by background (lighting flattened)
+    ink_raw: np.ndarray | None = None  # ink mask before straightening
+    skew_angles: np.ndarray | None = None  # angles that were tried
+    skew_scores: np.ndarray | None = None  # sharpness score for each tried angle
 
 
 def resize_to_max_side(img: np.ndarray, max_side: int = 2000) -> np.ndarray:
@@ -64,22 +75,33 @@ def to_gray(img: np.ndarray) -> np.ndarray:
     return cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
 
 
-def make_ink_mask(gray: np.ndarray) -> np.ndarray:
-    """Return a mask that is 255 on ink and 0 on paper.
+def flatten_lighting(gray: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Remove shadows and uneven lighting.
 
-    Uneven lighting is removed first: a morphological close with a kernel
-    larger than a pen stroke erases the ink and leaves an estimate of the
-    paper brightness. Dividing by it flattens shadows. Otsu's method then
-    picks the ink/paper threshold automatically.
+    A morphological close with a kernel larger than a pen stroke erases the
+    ink and leaves an estimate of the paper brightness (the background).
+    Dividing the page by it makes the paper uniformly white.
+    Returns (background, flattened_gray).
     """
     h, w = gray.shape
     k = max(15, (min(h, w) // 20) | 1)
     kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k))
     background = cv2.morphologyEx(gray, cv2.MORPH_CLOSE, kernel)
     flat = cv2.divide(gray, background, scale=255)
-    flat = cv2.GaussianBlur(flat, (3, 3), 0)
-    _, ink = cv2.threshold(flat, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+    return background, flat
+
+
+def threshold_ink(flat: np.ndarray) -> np.ndarray:
+    """Otsu threshold on a flattened page: 255 on ink, 0 on paper."""
+    blurred = cv2.GaussianBlur(flat, (3, 3), 0)
+    _, ink = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
     return cv2.medianBlur(ink, 3)  # removes isolated specks
+
+
+def make_ink_mask(gray: np.ndarray) -> np.ndarray:
+    """Return a mask that is 255 on ink and 0 on paper (flatten lighting, then Otsu)."""
+    _, flat = flatten_lighting(gray)
+    return threshold_ink(flat)
 
 
 def _rotate(img: np.ndarray, angle: float, border_value: int, interpolation: int) -> np.ndarray:
@@ -88,12 +110,12 @@ def _rotate(img: np.ndarray, angle: float, border_value: int, interpolation: int
     return cv2.warpAffine(img, matrix, (w, h), flags=interpolation, borderValue=border_value)
 
 
-def estimate_skew_angle(ink: np.ndarray, max_angle: float = 10.0, step: float = 0.5) -> float:
-    """Find the rotation (degrees, OpenCV sign convention) that straightens the text.
+def skew_scores(ink: np.ndarray, max_angle: float = 10.0, step: float = 0.5) -> tuple[np.ndarray, np.ndarray]:
+    """Score how "line-like" the page is after each trial rotation.
 
-    Idea: when text lines are horizontal, the row-wise ink sums form sharp
-    peaks (lines) and deep valleys (gaps), so their variance is largest. We
-    try small rotations and keep the one with the highest variance.
+    When text lines are horizontal, the row-wise ink sums form sharp peaks
+    (lines) and deep valleys (gaps), so their variance is largest. We try
+    small rotations and return the variance for each one.
     """
     longest = max(ink.shape)
     small = ink
@@ -101,24 +123,47 @@ def estimate_skew_angle(ink: np.ndarray, max_angle: float = 10.0, step: float = 
         scale = 800 / longest
         small = cv2.resize(ink, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA)
 
-    best_angle, best_score = 0.0, -1.0
-    for angle in np.arange(-max_angle, max_angle + 1e-9, step):
+    angles = np.arange(-max_angle, max_angle + 1e-9, step)
+    scores = np.empty(len(angles), dtype=np.float64)
+    for i, angle in enumerate(angles):
         rotated = _rotate(small, float(angle), 0, cv2.INTER_NEAREST)
-        score = float(np.var(rotated.sum(axis=1, dtype=np.float64)))
-        if score > best_score:
-            best_angle, best_score = float(angle), score
-    return best_angle
+        scores[i] = float(np.var(rotated.sum(axis=1, dtype=np.float64)))
+    return angles, scores
+
+
+def estimate_skew_angle(ink: np.ndarray, max_angle: float = 10.0, step: float = 0.5) -> float:
+    """Rotation (degrees, OpenCV sign convention) that straightens the text."""
+    angles, scores = skew_scores(ink, max_angle, step)
+    return float(angles[int(np.argmax(scores))])
 
 
 def prepare_page(img_bgr: np.ndarray, max_side: int = 2000, deskew: bool = True) -> PreparedPage:
-    """Grayscale, straighten and binarise a page."""
-    gray = to_gray(resize_to_max_side(img_bgr, max_side))
+    """Grayscale, flatten lighting, binarise and straighten a page, keeping every stage."""
+    gray_raw = to_gray(resize_to_max_side(img_bgr, max_side))
+    background, flat = flatten_lighting(gray_raw)
+    ink_raw = threshold_ink(flat)
+
     angle = 0.0
+    angles = scores = None
+    gray, ink = gray_raw, ink_raw
     if deskew:
-        angle = estimate_skew_angle(make_ink_mask(gray))
+        angles, scores = skew_scores(ink_raw)
+        angle = float(angles[int(np.argmax(scores))])
         if abs(angle) > 1e-6:
-            gray = _rotate(gray, angle, 255, cv2.INTER_CUBIC)
-    return PreparedPage(gray=gray, ink=make_ink_mask(gray), skew_angle=angle)
+            gray = _rotate(gray_raw, angle, 255, cv2.INTER_CUBIC)
+            ink = make_ink_mask(gray)
+
+    return PreparedPage(
+        gray=gray,
+        ink=ink,
+        skew_angle=angle,
+        gray_raw=gray_raw,
+        background=background,
+        flat=flat,
+        ink_raw=ink_raw,
+        skew_angles=angles,
+        skew_scores=scores,
+    )
 
 
 def _runs(active: np.ndarray) -> list[tuple[int, int]]:
@@ -145,6 +190,15 @@ def _box_for_rows(ink: np.ndarray, y0: int, y1: int) -> LineBox | None:
     return LineBox(int(xs[0]), int(y0), int(xs[-1]) + 1, int(y1))
 
 
+def row_profile(ink: np.ndarray, ink_fraction: float = 0.05) -> tuple[np.ndarray, float]:
+    """Smoothed ink count per pixel row, and the threshold above which a row counts as text."""
+    h = ink.shape[0]
+    profile = (ink > 0).sum(axis=1).astype(np.float64)
+    k = max(3, int(h * 0.004) | 1)
+    smooth = np.convolve(profile, np.ones(k) / k, mode="same")
+    return smooth, float(ink_fraction * smooth.max())
+
+
 def detect_lines(
     ink: np.ndarray,
     ink_fraction: float = 0.05,
@@ -164,13 +218,10 @@ def detect_lines(
     conventional notes.
     """
     h, _ = ink.shape
-    profile = (ink > 0).sum(axis=1).astype(np.float64)
-    if profile.max() <= 0:
+    smooth, threshold = row_profile(ink, ink_fraction)
+    if smooth.max() <= 0:
         return []
-
-    k = max(3, int(h * 0.004) | 1)
-    smooth = np.convolve(profile, np.ones(k) / k, mode="same")
-    active = smooth > ink_fraction * smooth.max()
+    active = smooth > threshold
 
     runs = _runs(active)
     merge_gap = max(1, int(h * merge_gap_fraction))
@@ -225,3 +276,35 @@ def draw_boxes(gray: np.ndarray, boxes: list[LineBox]) -> np.ndarray:
         cv2.rectangle(rgb, (box.x0, box.y0), (box.x1, box.y1), (220, 40, 40), 2)
         cv2.putText(rgb, str(i), (box.x0, max(15, box.y0 - 5)), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (220, 40, 40), 2)
     return rgb
+
+
+def draw_profile_view(
+    gray: np.ndarray,
+    ink: np.ndarray,
+    boxes: list[LineBox],
+    ink_fraction: float = 0.05,
+    graph_width: int = 260,
+) -> np.ndarray:
+    """Page with numbered line boxes, side by side with its row-ink profile.
+
+    Both halves share the same vertical scale, so every bar lines up with the
+    page rows it was measured from. The red vertical line is the threshold: rows
+    whose bar passes it are counted as text.
+    """
+    page = draw_boxes(gray, boxes)
+    h = gray.shape[0]
+    smooth, threshold = row_profile(ink, ink_fraction)
+    peak = max(float(smooth.max()), 1.0)
+    usable = graph_width - 6
+
+    graph = np.full((h, graph_width, 3), 255, np.uint8)
+    for box in boxes:  # shade the rows that were accepted as lines
+        cv2.rectangle(graph, (0, box.y0), (graph_width, box.y1), (222, 242, 222), -1)
+    for y in range(h):
+        length = int(smooth[y] / peak * usable)
+        if length > 0:
+            cv2.line(graph, (0, y), (length, y), (70, 110, 200), 1)
+    thr_x = int(threshold / peak * usable)
+    cv2.line(graph, (thr_x, 0), (thr_x, h), (220, 40, 40), 2)
+    cv2.line(graph, (0, 0), (0, h), (150, 150, 150), 1)
+    return cv2.hconcat([page, graph])

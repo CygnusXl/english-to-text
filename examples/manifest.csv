@@ -1,0 +1,4 @@
+file,title,ground_truth,source
+demo_clean.png,"Demo 1: clean, straight page",meeting notes monday\nbuy milk and eggs\nfinish the report draft\ncall the dentist at noon\nread chapter seven,"Demo page drawn by a script with a computer font (not real handwriting, not from the training data)"
+demo_tilted_shadow.png,Demo 2: tilted page with a shadow,project ideas for friday\ndraw the model diagram\nwrite the dataset section\ntest the line detector\nemail the supervisor,"Demo page drawn by a script with a computer font (not real handwriting, not from the training data)"
+demo_low_contrast.png,"Demo 3: faint ink, noisy, slightly blurred",shopping list for the week\nrice and green tea\nnew notebook and pens\ncharge the camera battery\nreturn the library books,"Demo page drawn by a script with a computer font (not real handwriting, not from the training data)"

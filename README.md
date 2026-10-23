@@ -52,9 +52,24 @@ pip install -r requirements.txt
 streamlit run app.py
 ```
 
-Current state: page straightening and line detection work. Text output is
-disabled until a trained checkpoint exists at `checkpoints/best.pt`; the app
-shows a notice instead of inventing text. No external API is used.
+The app is a step-by-step walkthrough: original image, grayscale, lighting
+flattening, ink mask, straightening, line detection (with the projection
+profile), line crops, and recognition. Each step shows the image and an
+explanation below it, using the real numbers from the page being processed.
+
+Current state: steps 1-7 work. Step 8 (text) is disabled until a trained
+checkpoint exists at `checkpoints/best.pt`; the app shows a notice instead of
+inventing text. No external API is used.
+
+### Examples
+
+`examples/manifest.csv` (columns `file, title, ground_truth, source`) lists
+the pages offered in the **Example page** selector. The three demo pages that
+ship with the repo are drawn by `scripts/make_demo_pages.py` with a computer
+font. They are **not** real handwriting and **not** from the training data.
+Real test-set samples will be exported into the same folder and manifest
+after the dataset has been inspected (Milestone 2), and the app will then
+show the model output next to the ground truth with CER and WER.
 
 Run the tests with `pip install pytest` then `python3 -m pytest tests -v`.
 The line-detection tests use a synthetic page, so they check the geometry
